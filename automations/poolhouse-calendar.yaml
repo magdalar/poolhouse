@@ -1,184 +1,86 @@
-alias: 'Calender-Toggle: PoolHouse Automation'
+alias: 'Calendar-Toggle: PoolHouse Automation'
 description: >-
-  Create entries in the 'PoolHouse Automation' calendar to trigger input_boolean
-  toggles, light toggles, or scenes. For scenes, only the start of the event is
-  considered; use separate entries for 'on' versus 'off' conditions, triggering
-  the respective scenes. There is no logic to consider current states or
-  bypasses; this is a dumb trigger.
+  Create entries in the 'PoolHouse Automation' calendar to trigger input_boolean,
+  light, fan, or switch toggles, or activate scenes/scripts. For scenes and
+  scripts, only the start of the event matters. Prefix the summary with
+  'Start:' or 'End:' to skip the on or off action for the other lifecycle
+  domains. There is no logic to consider current states or bypasses; this is
+  a dumb trigger.
 triggers:
-  - event: start
+  - trigger: calendar
+    event: start
     offset: '0:0:0'
     entity_id: calendar.poolhouse_automation
     id: start
-    trigger: calendar
-  - event: end
+  - trigger: calendar
+    event: end
     offset: '0:0:0'
     entity_id: calendar.poolhouse_automation
     id: end
-    trigger: calendar
 conditions: []
+variables:
+  location: "{{ trigger.calendar_event.location }}"
+  summary: "{{ trigger.calendar_event.summary }}"
+  domain: "{{ location.split('.')[0] if '.' in location else '' }}"
 actions:
   - choose:
+      # Bad/unknown entity referenced in location
       - conditions:
           - condition: template
-            value_template: '{{ states(trigger.calendar_event.location) == ''unknown'' }}'
+            value_template: "{{ states(location) == 'unknown' }}"
         sequence:
-          - data:
-              message: >-
-                Calendar entry '{{ trigger.calendar_event.summary }}' has
-                unknown entity as location: '{{ trigger.calendar_event.location
-                }}'. More details: {{ trigger.calendar_event }}
+          - action: system_log.write
+            data:
               level: error
-            action: system_log.write
+              message: >-
+                Calendar entry '{{ summary }}' has unknown entity as location:
+                '{{ location }}'. More details: {{ trigger.calendar_event }}
+
+      # Scenes/scripts: fire only on start, no on/off distinction
       - conditions:
-          - condition: and
-            conditions:
-              - condition: template
-                value_template: '{{ trigger.calendar_event.location.startswith(''scene.'') }}'
-              - condition: trigger
-                id: start
+          - condition: trigger
+            id: start
+          - condition: template
+            value_template: "{{ domain in ['scene', 'script'] }}"
         sequence:
-          - data:
-              entity_id: '{{ trigger.calendar_event.location }}'
+          - action: "{{ domain }}.turn_on"
+            target:
+              entity_id: "{{ location }}"
             continue_on_error: true
-            action: scene.turn_on
+
+      # Toggleable domains: on at start (unless 'End:'), off at end (unless 'Start:')
       - conditions:
-          - condition: and
+          - condition: template
+            value_template: "{{ domain in ['light', 'fan', 'switch', 'input_boolean'] }}"
+          - condition: or
             conditions:
-              - condition: template
-                value_template: '{{ trigger.calendar_event.location.startswith(''script.'') }}'
-              - condition: trigger
-                id: start
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: start
+                  - condition: template
+                    value_template: "{{ not summary.startswith('End:') }}"
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: end
+                  - condition: template
+                    value_template: "{{ not summary.startswith('Start:') }}"
         sequence:
-          - target:
-              entity_id: '{{ trigger.calendar_event.location }}'
+          - action: "{{ domain }}.turn_{{ 'on' if trigger.id == 'start' else 'off' }}"
+            data:
+              entity_id: "{{ location }}"
             continue_on_error: true
-            action: script.turn_on
-            data: {}
-      - conditions:
-          - condition: and
-            conditions:
-              - condition: template
-                value_template: '{{ trigger.calendar_event.location.startswith(''light.'') }}'
-              - condition: template
-                value_template: '{{ not trigger.calendar_event.summary.startswith(''End:'') }}'
-              - condition: trigger
-                id: start
-        sequence:
-          - data:
-              entity_id: '{{ trigger.calendar_event.location }}'
-            continue_on_error: true
-            action: light.turn_on
-      - conditions:
-          - condition: and
-            conditions:
-              - condition: template
-                value_template: '{{ trigger.calendar_event.location.startswith(''light.'') }}'
-              - condition: template
-                value_template: '{{ not trigger.calendar_event.summary.startswith(''Start:'') }}'
-              - condition: trigger
-                id: end
-        sequence:
-          - data:
-              entity_id: '{{ trigger.calendar_event.location }}'
-            continue_on_error: true
-            action: light.turn_off
-      - conditions:
-          - condition: and
-            conditions:
-              - condition: template
-                value_template: '{{ trigger.calendar_event.location.startswith(''fan.'') }}'
-              - condition: template
-                value_template: '{{ not trigger.calendar_event.summary.startswith(''End:'') }}'
-              - condition: trigger
-                id: start
-        sequence:
-          - data:
-              entity_id: '{{ trigger.calendar_event.location }}'
-            continue_on_error: true
-            action: fan.turn_on
-      - conditions:
-          - condition: and
-            conditions:
-              - condition: template
-                value_template: '{{ trigger.calendar_event.location.startswith(''fan.'') }}'
-              - condition: template
-                value_template: '{{ not trigger.calendar_event.summary.startswith(''Start:'') }}'
-              - condition: trigger
-                id: end
-        sequence:
-          - data:
-              entity_id: '{{ trigger.calendar_event.location }}'
-            continue_on_error: true
-            action: fan.turn_off
-      - conditions:
-          - condition: and
-            conditions:
-              - condition: template
-                value_template: >-
-                  {{
-                  trigger.calendar_event.location.startswith('input_boolean.')
-                  }}
-              - condition: template
-                value_template: '{{ not trigger.calendar_event.summary.startswith(''End:'') }}'
-              - condition: trigger
-                id: start
-        sequence:
-          - data:
-              entity_id: '{{ trigger.calendar_event.location }}'
-            action: input_boolean.turn_on
-      - conditions:
-          - condition: and
-            conditions:
-              - condition: template
-                value_template: >-
-                  {{
-                  trigger.calendar_event.location.startswith('input_boolean.')
-                  }}
-              - condition: template
-                value_template: '{{ not trigger.calendar_event.summary.startswith(''Start:'') }}'
-              - condition: trigger
-                id: end
-        sequence:
-          - data:
-              entity_id: '{{ trigger.calendar_event.location }}'
-            action: input_boolean.turn_off
-      - conditions:
-          - condition: and
-            conditions:
-              - condition: template
-                value_template: '{{ trigger.calendar_event.location.startswith(''switch.'') }}'
-              - condition: template
-                value_template: '{{ not trigger.calendar_event.summary.startswith(''End:'') }}'
-              - condition: trigger
-                id: start
-        sequence:
-          - data:
-              entity_id: '{{ trigger.calendar_event.location }}'
-            continue_on_error: true
-            action: switch.turn_on
-      - conditions:
-          - condition: and
-            conditions:
-              - condition: template
-                value_template: '{{ trigger.calendar_event.location.startswith(''switch.'') }}'
-              - condition: template
-                value_template: '{{ not trigger.calendar_event.summary.startswith(''Start:'') }}'
-              - condition: trigger
-                id: end
-        sequence:
-          - data:
-              entity_id: '{{ trigger.calendar_event.location }}'
-            continue_on_error: true
-            action: switch.turn_off
+
+      # Any other 'end' event we don't otherwise handle: ignore silently
       - conditions:
           - condition: trigger
             id: end
-        sequence: null
+        sequence: []
     default:
-      - data:
-          message: 'Malformatted or unsupported calendar entry. Trigger: {{ trigger }}'
+      - action: system_log.write
+        data:
           level: error
-        action: system_log.write
+          message: "Malformatted or unsupported calendar entry. Trigger: {{ trigger }}"
 mode: parallel
 max: 10
