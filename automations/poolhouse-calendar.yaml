@@ -1,0 +1,184 @@
+alias: 'Calender-Toggle: PoolHouse Automation'
+description: >-
+  Create entries in the 'PoolHouse Automation' calendar to trigger input_boolean
+  toggles, light toggles, or scenes. For scenes, only the start of the event is
+  considered; use separate entries for 'on' versus 'off' conditions, triggering
+  the respective scenes. There is no logic to consider current states or
+  bypasses; this is a dumb trigger.
+triggers:
+  - event: start
+    offset: '0:0:0'
+    entity_id: calendar.poolhouse_automation
+    id: start
+    trigger: calendar
+  - event: end
+    offset: '0:0:0'
+    entity_id: calendar.poolhouse_automation
+    id: end
+    trigger: calendar
+conditions: []
+actions:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: '{{ states(trigger.calendar_event.location) == ''unknown'' }}'
+        sequence:
+          - data:
+              message: >-
+                Calendar entry '{{ trigger.calendar_event.summary }}' has
+                unknown entity as location: '{{ trigger.calendar_event.location
+                }}'. More details: {{ trigger.calendar_event }}
+              level: error
+            action: system_log.write
+      - conditions:
+          - condition: and
+            conditions:
+              - condition: template
+                value_template: '{{ trigger.calendar_event.location.startswith(''scene.'') }}'
+              - condition: trigger
+                id: start
+        sequence:
+          - data:
+              entity_id: '{{ trigger.calendar_event.location }}'
+            continue_on_error: true
+            action: scene.turn_on
+      - conditions:
+          - condition: and
+            conditions:
+              - condition: template
+                value_template: '{{ trigger.calendar_event.location.startswith(''script.'') }}'
+              - condition: trigger
+                id: start
+        sequence:
+          - target:
+              entity_id: '{{ trigger.calendar_event.location }}'
+            continue_on_error: true
+            action: script.turn_on
+            data: {}
+      - conditions:
+          - condition: and
+            conditions:
+              - condition: template
+                value_template: '{{ trigger.calendar_event.location.startswith(''light.'') }}'
+              - condition: template
+                value_template: '{{ not trigger.calendar_event.summary.startswith(''End:'') }}'
+              - condition: trigger
+                id: start
+        sequence:
+          - data:
+              entity_id: '{{ trigger.calendar_event.location }}'
+            continue_on_error: true
+            action: light.turn_on
+      - conditions:
+          - condition: and
+            conditions:
+              - condition: template
+                value_template: '{{ trigger.calendar_event.location.startswith(''light.'') }}'
+              - condition: template
+                value_template: '{{ not trigger.calendar_event.summary.startswith(''Start:'') }}'
+              - condition: trigger
+                id: end
+        sequence:
+          - data:
+              entity_id: '{{ trigger.calendar_event.location }}'
+            continue_on_error: true
+            action: light.turn_off
+      - conditions:
+          - condition: and
+            conditions:
+              - condition: template
+                value_template: '{{ trigger.calendar_event.location.startswith(''fan.'') }}'
+              - condition: template
+                value_template: '{{ not trigger.calendar_event.summary.startswith(''End:'') }}'
+              - condition: trigger
+                id: start
+        sequence:
+          - data:
+              entity_id: '{{ trigger.calendar_event.location }}'
+            continue_on_error: true
+            action: fan.turn_on
+      - conditions:
+          - condition: and
+            conditions:
+              - condition: template
+                value_template: '{{ trigger.calendar_event.location.startswith(''fan.'') }}'
+              - condition: template
+                value_template: '{{ not trigger.calendar_event.summary.startswith(''Start:'') }}'
+              - condition: trigger
+                id: end
+        sequence:
+          - data:
+              entity_id: '{{ trigger.calendar_event.location }}'
+            continue_on_error: true
+            action: fan.turn_off
+      - conditions:
+          - condition: and
+            conditions:
+              - condition: template
+                value_template: >-
+                  {{
+                  trigger.calendar_event.location.startswith('input_boolean.')
+                  }}
+              - condition: template
+                value_template: '{{ not trigger.calendar_event.summary.startswith(''End:'') }}'
+              - condition: trigger
+                id: start
+        sequence:
+          - data:
+              entity_id: '{{ trigger.calendar_event.location }}'
+            action: input_boolean.turn_on
+      - conditions:
+          - condition: and
+            conditions:
+              - condition: template
+                value_template: >-
+                  {{
+                  trigger.calendar_event.location.startswith('input_boolean.')
+                  }}
+              - condition: template
+                value_template: '{{ not trigger.calendar_event.summary.startswith(''Start:'') }}'
+              - condition: trigger
+                id: end
+        sequence:
+          - data:
+              entity_id: '{{ trigger.calendar_event.location }}'
+            action: input_boolean.turn_off
+      - conditions:
+          - condition: and
+            conditions:
+              - condition: template
+                value_template: '{{ trigger.calendar_event.location.startswith(''switch.'') }}'
+              - condition: template
+                value_template: '{{ not trigger.calendar_event.summary.startswith(''End:'') }}'
+              - condition: trigger
+                id: start
+        sequence:
+          - data:
+              entity_id: '{{ trigger.calendar_event.location }}'
+            continue_on_error: true
+            action: switch.turn_on
+      - conditions:
+          - condition: and
+            conditions:
+              - condition: template
+                value_template: '{{ trigger.calendar_event.location.startswith(''switch.'') }}'
+              - condition: template
+                value_template: '{{ not trigger.calendar_event.summary.startswith(''Start:'') }}'
+              - condition: trigger
+                id: end
+        sequence:
+          - data:
+              entity_id: '{{ trigger.calendar_event.location }}'
+            continue_on_error: true
+            action: switch.turn_off
+      - conditions:
+          - condition: trigger
+            id: end
+        sequence: null
+    default:
+      - data:
+          message: 'Malformatted or unsupported calendar entry. Trigger: {{ trigger }}'
+          level: error
+        action: system_log.write
+mode: parallel
+max: 10
