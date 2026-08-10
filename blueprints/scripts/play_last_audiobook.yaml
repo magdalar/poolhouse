@@ -1,0 +1,100 @@
+blueprint:
+  name: Play Last Audiobook
+  description: >
+    Plays the most recently played audiobook, found via a REST command lookup
+    against Audiobookshelf, on a Music Assistant-connected speaker, using Music
+    Assistant to start playback. Falls back to a spoken TTS message if no book
+    is found.
+  domain: script
+  source_url: https://github.com/magdalar/poolhouse/blueprints/scripts/play_last_audiobook.yaml
+  input:
+    default_media_player:
+      name: Default Media Player
+      description: Speaker to play the audiobook on when no override is given at call time.
+      selector:
+        entity:
+          domain: media_player
+
+    abs_prefix:
+      name: Audiobookshelf Media ID Prefix
+      description: >
+        The audiobookshelf integration media_id prefix, e.g.
+        audiobookshelf--<instance_id>://audiobook/
+        Find this in your Music Assistant settings for the player.
+      selector:
+        text:
+      default: "audiobookshelf--by4yKncv://audiobook/"
+
+    latest_audiobook_action:
+      name: Latest Audiobook REST Command
+      description: >
+        The rest_command action (as "rest_command.xxx") that returns the
+        library item(s) for the currently in-progress audiobook.
+      selector:
+        text:
+      default: "rest_command.eric_latest_audiobook"
+
+    tts_entity:
+      name: TTS Entity
+      description: Entity used to speak the "not found" fallback message.
+      selector:
+        entity:
+          domain: tts
+      default: tts.home_assistant_cloud
+
+    not_found_message:
+      name: Not Found Message
+      description: Message spoken when no audiobook is found.
+      selector:
+        text:
+      default: "Couldn't find a book to play"
+
+mode: restart
+icon: mdi:book-play
+
+fields:
+  target_media_player:
+    selector:
+      entity:
+        domain: media_player
+    name: Target Media Player
+    description: Override the default media player and play here instead.
+    required: false
+
+variables:
+  default_media_player: !input default_media_player
+  resolved_media_player: "{{ target_media_player | default(default_media_player, true) }}"
+  abs_prefix: !input abs_prefix
+  latest_audiobook_action: !input latest_audiobook_action
+  tts_entity: !input tts_entity
+  not_found_message: !input not_found_message
+
+sequence:
+  - action: "{{ latest_audiobook_action }}"
+    response_variable: continue_book
+  - variables:
+      book_id: >-
+        {% if continue_book.content.libraryItems | length > 0 %}
+          {{ continue_book.content.libraryItems[0].id }}
+        {% else %}
+          none
+        {% endif %}
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ book_id != 'none' }}"
+        sequence:
+          - action: music_assistant.play_media
+            target:
+              entity_id: "{{ resolved_media_player }}"
+            data:
+              enqueue: replace
+              media_type: audiobook
+              media_id: "{{ abs_prefix }}{{ book_id }}"
+    default:
+      - action: tts.speak
+        target:
+          entity_id: "{{ tts_entity }}"
+        data:
+          message: "{{ not_found_message }}"
+          media_player_entity_id: "{{ resolved_media_player }}"
