@@ -72,6 +72,14 @@ actions:
               entity_id: "{{ location }}"
             continue_on_error: true
 
+      # Ignore 'start' events for 'End:' summaries.
+      - conditions:
+          - condition: trigger
+            id: start
+          - condition: template
+            value_template: '{{ summary.startswith(''End:'') }}'
+        sequence: []
+
       # Any other 'end' event we don't otherwise handle: ignore silently
       - conditions:
           - condition: trigger
