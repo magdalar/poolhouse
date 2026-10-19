@@ -158,16 +158,37 @@ actions:
               - condition: template
                 value_template: "{{ wait_entity != '' }}"
             then:
-              - wait_template: >-
-                  {% if wait_state == 'off' %}
-                    {{ is_state(wait_entity, 'off') and
-                       (now() - states[wait_entity].last_changed).total_seconds() >= (for_minutes * 60) }}
-                  {% else %}
-                    {{ is_state(wait_entity, 'on') or
-                       states[wait_entity].last_changed >= as_datetime(lookback_cutoff) }}
-                  {% endif %}
-                timeout: "{{ [event_duration_remaining - 2, 0] | max }}"
-                continue_on_timeout: "{{ summary.startswith('Start:') }}"
+              - choose:
+                  # Case A: If it's a 'Start:' event, continue on timeout (force on at event end)
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ summary.startswith('Start:') }}"
+                    sequence:
+                      - wait_template: >-
+                          {% if wait_state == 'off' %}
+                            {{ is_state(wait_entity, 'off') and
+                               (now() - states[wait_entity].last_changed).total_seconds() >= (for_minutes * 60) }}
+                          {% else %}
+                            {{ is_state(wait_entity, 'on') or
+                               states[wait_entity].last_changed >= as_datetime(lookback_cutoff) }}
+                          {% endif %}
+                        timeout: "{{ [event_duration_remaining - 2, 0] | max }}"
+                        continue_on_timeout: true
+
+                  # Case B: Regular toggleable event, abort on timeout so it doesn't turn on at the end
+                  - conditions: []
+                    sequence:
+                      - wait_template: >-
+                          {% if wait_state == 'off' %}
+                            {{ is_state(wait_entity, 'off') and
+                               (now() - states[wait_entity].last_changed).total_seconds() >= (for_minutes * 60) }}
+                          {% else %}
+                            {{ is_state(wait_entity, 'on') or
+                               states[wait_entity].last_changed >= as_datetime(lookback_cutoff) }}
+                          {% endif %}
+                        timeout: "{{ [event_duration_remaining - 2, 0] | max }}"
+                        continue_on_timeout: false
+
           - action: "{{ domain }}.turn_{{ 'on' if trigger.id == 'start' else 'off' }}"
             target:
               entity_id: "{{ location }}"
