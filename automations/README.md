@@ -1,17 +1,17 @@
 # PoolHouse Calendar Automation (`poolhouse-calendar.yaml`)
 
-This automation uses the **`PoolHouse Automation` (`calendar.poolhouse_automation`)** calendar as a flexible scheduler for Home Assistant entities[cite: 1]. It supports immediate "dumb" triggers, lifecycle-bound toggles, and occupancy/state-gated execution bounded by the calendar event's time window[cite: 1].
+This automation uses the **`PoolHouse Automation` (`calendar.poolhouse_automation`)** calendar as a flexible scheduler for Home Assistant entities. It supports immediate "dumb" triggers, lifecycle-bound toggles, and occupancy/state-gated execution bounded by the calendar event's time window.
 
 ---
 
 ## Calendar Event Field Mapping
 
-Every calendar entry uses three standard fields to control what happens and when[cite: 1]:
+Every calendar entry uses three standard fields to control what happens and when:
 
 | Calendar Field | Required | Purpose | Example |
 | :--- | :---: | :--- | :--- |
-| **Summary (Title)** | Yes | Human-readable label and optional lifecycle prefix (`Start:` or `End:`)[cite: 1]. | `Start: Morning Music` |
-| **Location** | Yes | The exact Home Assistant `entity_id` to control[cite: 1]. | `script.morning_music_wake_up` |
+| **Summary (Title)** | Yes | Human-readable label and optional lifecycle prefix (`Start:` or `End:`). | `Start: Morning Music` |
+| **Location** | Yes | The exact Home Assistant `entity_id` to control. | `script.morning_music_wake_up` |
 | **Description** | No | Optional sensor/entity gating condition (shorthand `entity_id` or YAML dictionary). | `binary_sensor.upstairs_stairwell_motion` |
 
 ---
@@ -19,28 +19,28 @@ Every calendar entry uses three standard fields to control what happens and when
 ## Supported Domains & Lifecycle Prefixes
 
 ### 1. One-Off Domains (`scene`, `script`)
-* Scenes and scripts only execute an activation (`turn_on`)[cite: 1].
-* They are always evaluated at the **start** of the calendar event[cite: 1]—even if the summary begins with `End:` (e.g., `End: Evening Lights` triggering `scene.evening_lights_off`).
+* Scenes and scripts only execute an activation (`turn_on`).
+* They are always evaluated at the **start** of the calendar event—even if the summary begins with `End:` (e.g., `End: Evening Lights` triggering `scene.evening_lights_off`).
 * If a `Description` wait condition is configured, the calendar event's **Start-to-End duration** acts as the waiting window.
 
 ### 2. Toggleable Domains (`light`, `switch`, `fan`, `input_boolean`)
-By default, toggleable entities turn **on** when the calendar event starts and turn **off** when the calendar event ends[cite: 1]. You can override this behavior by prefixing the **Summary**[cite: 1]:
+By default, toggleable entities turn **on** when the calendar event starts and turn **off** when the calendar event ends. You can override this behavior by prefixing the **Summary**:
 
 * **No Prefix** (e.g., `Kitchen Lights`):
   * **Event Start:** Turns entity `on` (or waits for motion during the window; if the window expires with no motion, it aborts turning `on`).
-  * **Event End:** Turns entity `off`[cite: 1].
+  * **Event End:** Turns entity `off`.
 * **`Start:` Prefix** (e.g., `Start: Porch Light`):
-  * **Event Start:** Turns entity `on` (if gated by a sensor, waits up to the end of the event, then forces `on` at timeout)[cite: 1].
-  * **Event End:** Ignored (does not turn `off`)[cite: 1].
+  * **Event Start:** Turns entity `on` (if gated by a sensor, waits up to the end of the event, then forces `on` at timeout).
+  * **Event End:** Ignored (does not turn `off`).
 * **`End:` Prefix** (e.g., `End: Patio Fan`):
-  * **Without Description:** Ignores event start; turns entity `off` at event end[cite: 1].
+  * **Without Description:** Ignores event start; turns entity `off` at event end.
   * **With Description (`wait_entity`):** Begins watching the sensor at event **start**, turns the entity `off` as soon as the condition is met, or forces it `off` at event **end**.
 
 ---
 
 ## Sensor-Gated Delays (`Description` Field)
 
-Leave the **Description** blank for immediate execution[cite: 1]. To delay an event until a secondary condition is met (bounded by the end of the calendar event), use either **Shorthand** or **YAML** in the Description.
+Leave the **Description** blank for immediate execution. To delay an event until a secondary condition is met (bounded by the end of the calendar event), use either **Shorthand** or **YAML** in the Description.
 
 ### Option A: Shorthand Syntax
 1. **Wait for Motion / Active State (`entity_id`)**
