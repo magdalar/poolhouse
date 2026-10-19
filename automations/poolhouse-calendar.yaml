@@ -1,11 +1,11 @@
 alias: 'Calendar-Toggle: PoolHouse Automation'
 description: >-
   Create entries in the 'PoolHouse Automation' calendar to trigger input_boolean,
-  light, fan, or switch toggles, or activate scenes/scripts. For scenes and
-  scripts, only the start of the event matters. Prefix the summary with
-  'Start:' or 'End:' to skip the on or off action for the other lifecycle
-  domains. There is no logic to consider current states or bypasses; this is
-  a dumb trigger.
+  light, fan, or switch toggles, or activate scenes/scripts. Prefix the summary
+  with 'Start:' or 'End:' to skip the on or off action for toggleable domains.
+  Optional Description config supports delaying actions until motion
+  (default: triggered within the last 60 mins or during event) or inactivity
+  (prefix with '!' or state: 'off', default: clear for 5 mins), bounded by event end.
 triggers:
   - trigger: calendar
     event: start
@@ -19,12 +19,46 @@ triggers:
     id: end
 conditions: []
 variables:
-  location: "{{ trigger.calendar_event.location }}"
-  summary: "{{ trigger.calendar_event.summary }}"
+  location: "{{ trigger.calendar_event.location | default('', true) | trim }}"
+  summary: "{{ trigger.calendar_event.summary | default('', true) | trim }}"
   domain: "{{ location.split('.')[0] if '.' in location else '' }}"
+  raw_desc: "{{ trigger.calendar_event.description | default('', true) | trim }}"
+  # Parse Description:
+  # - YAML dict ("wait_entity: ...\nwithin_minutes: 60" or "state: 'off'\nfor_minutes: 10")
+  # - "!binary_sensor.xyz" shorthand -> wait for 'off' (clear) for 5 mins
+  # - "binary_sensor.xyz" shorthand -> wait for 'on' (or triggered within last 60 mins)
+  desc_config: >-
+    {% if ':' in raw_desc %}
+      {{ raw_desc | from_yaml }}
+    {% elif raw_desc.startswith('!') and '.' in raw_desc and ' ' not in raw_desc %}
+      {{ {'wait_entity': raw_desc[1:], 'state': 'off', 'for_minutes': 5} }}
+    {% elif '.' in raw_desc and ' ' not in raw_desc %}
+      {{ {'wait_entity': raw_desc, 'state': 'on', 'within_minutes': 60} }}
+    {% else %}
+      {{ {} }}
+    {% endif %}
+  wait_entity: "{{ desc_config.get('wait_entity', '') | trim }}"
+  wait_state: "{{ desc_config.get('state', 'on') | lower | trim }}"
+  within_minutes: "{{ desc_config.get('within_minutes', 60) | float(60) }}"
+  for_minutes: "{{ desc_config.get('for_minutes', 5 if wait_state == 'off' else 0) | float(0) }}"
+  # Calculate the fixed lookback cutoff timestamp at the moment the calendar event triggers.
+  # Supports optional 'since: HH:MM:SS' override, otherwise defaults to (now() - within_minutes).
+  lookback_cutoff: >-
+    {% if desc_config.get('since') is not none %}
+      {{ today_at(desc_config.get('since') | string).isoformat() }}
+    {% else %}
+      {{ (now() - timedelta(minutes=within_minutes)).isoformat() }}
+    {% endif %}
+  # True if this is an 'End:' toggleable that is using a wait_entity window
+  is_delayed_end_toggle: >-
+    {{ domain in ['light', 'fan', 'switch', 'input_boolean']
+       and summary.startswith('End:')
+       and wait_entity != '' }}
+  event_duration_remaining: >-
+    {{ [ (as_datetime(trigger.calendar_event.end) - now()).total_seconds() | int(0), 0 ] | max }}
 actions:
   - choose:
-      # Bad/unknown entity referenced in location
+      # 1. Bad/unknown entity referenced in location
       - conditions:
           - condition: template
             value_template: "{{ states(location) == 'unknown' }}"
@@ -36,19 +70,70 @@ actions:
                 Calendar entry '{{ summary }}' has unknown entity as location:
                 '{{ location }}'. More details: {{ trigger.calendar_event }}
 
-      # Scenes/scripts: fire only on start, no on/off distinction
+      # 2. Bad/unknown wait_entity referenced in description
+      - conditions:
+          - condition: template
+            value_template: "{{ wait_entity != '' and states(wait_entity) == 'unknown' }}"
+        sequence:
+          - action: system_log.write
+            data:
+              level: error
+              message: >-
+                Calendar entry '{{ summary }}' has unknown wait_entity in description:
+                '{{ wait_entity }}'. More details: {{ trigger.calendar_event }}
+
+      # 3. Scenes/scripts: evaluate at event 'start' (even if summary starts with 'End:')
       - conditions:
           - condition: trigger
             id: start
           - condition: template
             value_template: "{{ domain in ['scene', 'script'] }}"
         sequence:
+          - if:
+              - condition: template
+                value_template: "{{ wait_entity != '' }}"
+            then:
+              - wait_template: >-
+                  {% if wait_state == 'off' %}
+                    {{ is_state(wait_entity, 'off') and
+                       (now() - states[wait_entity].last_changed).total_seconds() >= (for_minutes * 60) }}
+                  {% else %}
+                    {{ is_state(wait_entity, 'on') or
+                       states[wait_entity].last_changed >= as_datetime(lookback_cutoff) }}
+                  {% endif %}
+                timeout: "{{ event_duration_remaining }}"
+                continue_on_timeout: true
           - action: "{{ domain }}.turn_on"
             target:
               entity_id: "{{ location }}"
             continue_on_error: true
 
-      # Toggleable domains: on at start (unless 'End:'), off at end (unless 'Start:')
+      # 4. Toggleable 'End:' events WITH a wait_entity:
+      # Start waiting at event 'start', turn off as soon as condition is met OR at event 'end'.
+      - conditions:
+          - condition: trigger
+            id: start
+          - condition: template
+            value_template: "{{ is_delayed_end_toggle }}"
+        sequence:
+          - wait_template: >-
+              {% if wait_state == 'off' %}
+                {{ is_state(wait_entity, 'off') and
+                   (now() - states[wait_entity].last_changed).total_seconds() >= (for_minutes * 60) }}
+              {% else %}
+                {{ is_state(wait_entity, 'on') or
+                   states[wait_entity].last_changed >= as_datetime(lookback_cutoff) }}
+              {% endif %}
+            timeout: "{{ event_duration_remaining }}"
+            continue_on_timeout: true
+          - action: "{{ domain }}.turn_off"
+            target:
+              entity_id: "{{ location }}"
+            continue_on_error: true
+
+      # 5. Standard Toggleable domains:
+      # - 'start' turns on (unless 'End:')
+      # - 'end' turns off (unless 'Start:' or already handled by is_delayed_end_toggle)
       - conditions:
           - condition: template
             value_template: "{{ domain in ['light', 'fan', 'switch', 'input_boolean'] }}"
@@ -65,22 +150,38 @@ actions:
                   - condition: trigger
                     id: end
                   - condition: template
-                    value_template: "{{ not summary.startswith('Start:') }}"
+                    value_template: "{{ not summary.startswith('Start:') and not is_delayed_end_toggle }}"
         sequence:
+          - if:
+              - condition: trigger
+                id: start
+              - condition: template
+                value_template: "{{ wait_entity != '' }}"
+            then:
+              - wait_template: >-
+                  {% if wait_state == 'off' %}
+                    {{ is_state(wait_entity, 'off') and
+                       (now() - states[wait_entity].last_changed).total_seconds() >= (for_minutes * 60) }}
+                  {% else %}
+                    {{ is_state(wait_entity, 'on') or
+                       states[wait_entity].last_changed >= as_datetime(lookback_cutoff) }}
+                  {% endif %}
+                timeout: "{{ [event_duration_remaining - 2, 0] | max }}"
+                continue_on_timeout: "{{ summary.startswith('Start:') }}"
           - action: "{{ domain }}.turn_{{ 'on' if trigger.id == 'start' else 'off' }}"
-            data:
+            target:
               entity_id: "{{ location }}"
             continue_on_error: true
 
-      # Ignore 'start' events for 'End:' summaries.
+      # 6. Ignore 'start' events for 'End:' summaries (when no wait_entity is used)
       - conditions:
           - condition: trigger
             id: start
           - condition: template
-            value_template: '{{ summary.startswith(''End:'') }}'
+            value_template: "{{ summary.startswith('End:') }}"
         sequence: []
 
-      # Any other 'end' event we don't otherwise handle: ignore silently
+      # 7. Any other 'end' event we don't otherwise handle: ignore silently
       - conditions:
           - condition: trigger
             id: end
@@ -91,4 +192,4 @@ actions:
           level: error
           message: "Malformatted or unsupported calendar entry. Trigger: {{ trigger }}"
 mode: parallel
-max: 10
+max: 20
