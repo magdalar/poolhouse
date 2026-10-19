@@ -20,7 +20,7 @@ It comes in two blueprints:
 3. **Create the Dispatcher.** *Calendar Toggle: Dispatcher* → Create automation, and set:
    * **Calendar:** the calendar you will create events in.
    * **Handler script:** the script from step 2.
-   * **Startup delay** (default 5 minutes): how long to wait after Home Assistant starts before recovering active events.
+   * **Startup delay** (default 1 minute): extra wait after Home Assistant's start event before recovering active events. Home Assistant only fires that event once startup has finished, so the delay just gives slower devices (Zigbee, Z-Wave, cloud integrations) time to reconnect. Raise it if your targets are still `unavailable` at that point; `0` recovers immediately.
 
 ---
 
@@ -147,9 +147,9 @@ You want your evening lights scene to activate starting at 10:30 PM, but delay i
 
 ## Home Assistant Restarts
 
-After a restart, the Dispatcher waits the configured **startup delay** (default 5 minutes) so integrations and devices are ready. It then re-dispatches every event that is active at that moment, so entities end up in the state the calendar says they should be in.
+After a restart, the Dispatcher waits the configured **startup delay** (default 1 minute) after Home Assistant's start event, which itself fires only once startup has finished. It then re-dispatches every event that is active at that moment, so entities end up in the state the calendar says they should be in.
 
-* **Motion lookback is skipped on startup.** A restart resets every entity's `last_changed`, which would make nearly every sensor look recently active. For recovered events, only the sensor's current state counts: a sensor that is `on` satisfies the wait, one that was merely active recently does not. "Off for N minutes" waits are unaffected, since the startup delay usually covers them (with a longer `for_minutes`, it waits the difference).
+* **Motion lookback is skipped on startup.** A restart resets every entity's `last_changed`, which would make nearly every sensor look recently active. For recovered events, only the sensor's current state counts: a sensor that is `on` satisfies the wait, one that was merely active recently does not. "Off for N minutes" waits are unaffected in effect, but they are counted from boot, so after a restart a default 5-minute inactivity wait takes about 5 minutes to be satisfied.
 * **Scenes and scripts are not re-run** for still-active events, unless `rerun_scenes_on_startup` is enabled on the Handler.
 * **Waits in progress are lost on restart, then recovered.** A recovered event restarts its wait from the beginning.
 * **Events that start or end during the startup delay** are handled by their normal triggers. The recovery step skips events that started after Home Assistant did, so nothing is handled twice.
@@ -201,4 +201,3 @@ After a restart, the Dispatcher waits the configured **startup delay** (default 
    * Because the work runs in the Handler script, reloading or disabling the Dispatcher does not cancel in-flight waits. Restart Home Assistant or stop the script to cancel them.
 9. **Single `wait_entity` Per Event:**
    * Each calendar entry supports monitoring one `wait_entity` in its Description. To gate an event on multiple motion sensors simultaneously, create a Home Assistant **Group Binary Sensor Helper** combining those sensors and reference the group's `entity_id` in the calendar Description.
-

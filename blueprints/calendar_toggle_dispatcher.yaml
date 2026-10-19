@@ -22,9 +22,11 @@ blueprint:
     startup_delay:
       name: Startup delay
       description: >-
-        How long to wait after Home Assistant starts before recovering active
-        events, so integrations and devices are ready.
-      default: 5
+        Extra wait after Home Assistant's start event before recovering active
+        events. The start event already fires after integrations have loaded,
+        so this only gives slower devices (Zigbee, Z-Wave, cloud) time to
+        reconnect. Use 0 to recover immediately.
+      default: 1
       selector:
         number:
           min: 0
