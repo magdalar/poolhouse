@@ -1,5 +1,6 @@
 blueprint:
   name: "Calendar Toggle: Dispatcher"
+  author: you
   domain: automation
   description: >-
     Fires on calendar event start/end and hands each event to the
@@ -14,7 +15,7 @@ blueprint:
           domain: calendar
     handler_script:
       name: Handler script
-      description: A script created from the "Calendar Toggle: Event Handler" blueprint.
+      description: 'A script created from the "Calendar Toggle: Event Handler" blueprint.'
       selector:
         entity:
           domain: script
