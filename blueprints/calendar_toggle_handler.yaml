@@ -1,0 +1,165 @@
+blueprint:
+  name: "Calendar Toggle: Event Handler"
+  domain: script
+  description: >-
+    Handles one calendar event (called by the "Calendar Toggle: Dispatcher"
+    automation blueprint). The event's Location is the entity to control
+    (input_boolean, light, fan, switch, scene or script). Prefix the Summary
+    with 'Start:' or 'End:' to skip the on or off action for toggleable
+    domains. The optional Description delays the action until motion (default:
+    triggered within the last 60 mins, or currently on) or inactivity (prefix
+    with '!' or use state: 'off', default: clear for 5 mins), bounded by the
+    event end. Description may be an entity id, '!entity_id', or YAML with
+    wait_entity, state, within_minutes, for_minutes, since.
+  input:
+    rerun_scenes_on_startup:
+      name: Re-run scenes/scripts after a Home Assistant restart
+      description: >-
+        If an event for a scene or script is still active when Home Assistant
+        restarts, activate it again. Off by default.
+      default: false
+      selector:
+        boolean: {}
+
+fields:
+  event:
+    name: Event
+    description: Calendar event dict (summary, location, description, start, end).
+    required: true
+    selector:
+      object: {}
+  trigger_id:
+    name: Trigger ID
+    description: One of start, end, startup.
+    required: true
+    selector:
+      text: {}
+
+mode: parallel
+max: 20
+
+sequence:
+  - variables:
+      rerun_scenes: !input rerun_scenes_on_startup
+      is_startup: "{{ trigger_id == 'startup' }}"
+      is_end: "{{ trigger_id == 'end' }}"
+      location: "{{ event.location | default('', true) | trim }}"
+      summary: "{{ event.summary | default('', true) | trim }}"
+      domain: "{{ location.split('.')[0] if '.' in location else '' }}"
+      is_toggle: "{{ domain in ['light', 'fan', 'switch', 'input_boolean'] }}"
+      is_scene: "{{ domain in ['scene', 'script'] }}"
+      raw_desc: "{{ event.description | default('', true) | trim }}"
+      # Description forms:
+      #  - YAML dict
+      #  - "!binary_sensor.xyz" -> wait for 'off' for 5 mins
+      #  - "binary_sensor.xyz"  -> wait for 'on' (or changed within last 60 mins)
+      desc_config: >-
+        {% if ':' in raw_desc %}
+          {{ raw_desc | from_yaml }}
+        {% elif raw_desc.startswith('!') and '.' in raw_desc and ' ' not in raw_desc %}
+          {{ {'wait_entity': raw_desc[1:], 'state': 'off', 'for_minutes': 5} }}
+        {% elif '.' in raw_desc and ' ' not in raw_desc %}
+          {{ {'wait_entity': raw_desc, 'state': 'on', 'within_minutes': 60} }}
+        {% else %}
+          {{ {} }}
+        {% endif %}
+      wait_entity: "{{ desc_config.get('wait_entity', '') | trim }}"
+      wait_state: "{{ desc_config.get('state', 'on') | lower | trim }}"
+      within_minutes: "{{ desc_config.get('within_minutes', 60) | float(60) }}"
+      for_minutes: "{{ desc_config.get('for_minutes', 5 if wait_state == 'off' else 0) | float(0) }}"
+      lookback_cutoff: >-
+        {% if desc_config.get('since') is not none %}
+          {{ today_at(desc_config.get('since') | string).isoformat() }}
+        {% else %}
+          {{ (now() - timedelta(minutes=within_minutes)).isoformat() }}
+        {% endif %}
+      # 'End:' toggleable that uses a wait_entity: wait from start, turn off
+      # when the condition is met or at event end.
+      is_delayed_end: >-
+        {{ is_toggle and summary.startswith('End:') and wait_entity != '' }}
+      remaining: >-
+        {{ [ ((as_datetime(event.end) | as_local) - now()).total_seconds() | int(0), 0 ] | max }}
+      # Which service to call ('' = nothing to do)
+      act: >-
+        {% if is_end %}
+          {{ 'turn_off' if is_toggle and not summary.startswith('Start:') and not is_delayed_end else '' }}
+        {% elif is_scene %}
+          {{ '' if is_startup and not rerun_scenes else 'turn_on' }}
+        {% elif is_toggle %}
+          {{ 'turn_off' if is_delayed_end else ('' if summary.startswith('End:') else 'turn_on') }}
+        {% endif %}
+      # Scenes/scripts, delayed End: and 'Start:' events act anyway when the
+      # wait times out. Plain events abort so they don't switch on at the end.
+      proceed_on_timeout: "{{ is_scene or is_delayed_end or summary.startswith('Start:') }}"
+      timeout_s: >-
+        {{ remaining if (is_scene or is_delayed_end) else ([remaining - 2, 0] | max) }}
+
+  # Unknown location entity
+  - if:
+      - condition: template
+        value_template: "{{ states(location) == 'unknown' }}"
+    then:
+      - action: system_log.write
+        data:
+          level: error
+          message: >-
+            Calendar entry '{{ summary }}' has unknown entity as location:
+            '{{ location }}'. Event: {{ event }}
+      - stop: "Unknown location entity"
+
+  # Unknown wait_entity
+  - if:
+      - condition: template
+        value_template: "{{ wait_entity != '' and states(wait_entity) == 'unknown' }}"
+    then:
+      - action: system_log.write
+        data:
+          level: error
+          message: >-
+            Calendar entry '{{ summary }}' has unknown wait_entity in description:
+            '{{ wait_entity }}'. Event: {{ event }}
+      - stop: "Unknown wait_entity"
+
+  # Unsupported domain on a start/startup trigger
+  - if:
+      - condition: template
+        value_template: >-
+          {{ not is_end and not is_toggle and not is_scene
+             and not summary.startswith('End:') }}
+    then:
+      - action: system_log.write
+        data:
+          level: error
+          message: "Malformatted or unsupported calendar entry: {{ event }}"
+      - stop: "Unsupported entry"
+
+  # Nothing to do (e.g. 'End:' start without wait, 'Start:' end, scene on startup)
+  - condition: template
+    value_template: "{{ act != '' }}"
+
+  # Optional wait for motion / inactivity (never on 'end')
+  - if:
+      - condition: template
+        value_template: "{{ wait_entity != '' and not is_end }}"
+    then:
+      - wait_template: >-
+          {% if wait_state == 'off' %}
+            {{ is_state(wait_entity, 'off') and
+               (now() - states[wait_entity].last_changed).total_seconds() >= (for_minutes * 60) }}
+          {% else %}
+            {{ is_state(wait_entity, 'on') or
+               (not is_startup and
+                states[wait_entity].last_changed >= as_datetime(lookback_cutoff)) }}
+          {% endif %}
+        timeout: "{{ timeout_s }}"
+        continue_on_timeout: true
+
+  # Abort if the wait timed out and this event type shouldn't act on timeout
+  - condition: template
+    value_template: >-
+      {{ wait_entity == '' or is_end or proceed_on_timeout or wait.completed }}
+
+  - action: "{{ domain }}.{{ act }}"
+    target:
+      entity_id: "{{ location }}"
+    continue_on_error: true

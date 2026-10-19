@@ -1,0 +1,98 @@
+blueprint:
+  name: "Calendar Toggle: Dispatcher"
+  domain: automation
+  description: >-
+    Fires on calendar event start/end and hands each event to the
+    "Calendar Toggle: Event Handler" script. After a Home Assistant restart it
+    waits for a configurable delay, then re-dispatches events that are still
+    active so lights/switches/etc. end up in the right state.
+  input:
+    calendar:
+      name: Calendar
+      selector:
+        entity:
+          domain: calendar
+    handler_script:
+      name: Handler script
+      description: A script created from the "Calendar Toggle: Event Handler" blueprint.
+      selector:
+        entity:
+          domain: script
+    startup_delay:
+      name: Startup delay
+      description: >-
+        How long to wait after Home Assistant starts before recovering active
+        events, so integrations and devices are ready.
+      default: 5
+      selector:
+        number:
+          min: 0
+          max: 60
+          unit_of_measurement: minutes
+          mode: box
+
+triggers:
+  - trigger: calendar
+    event: start
+    offset: '0:0:0'
+    entity_id: !input calendar
+    id: start
+  - trigger: calendar
+    event: end
+    offset: '0:0:0'
+    entity_id: !input calendar
+    id: end
+  - trigger: homeassistant
+    event: start
+    id: startup
+
+conditions: []
+
+variables:
+  calendar: !input calendar
+  handler_script: !input handler_script
+  startup_delay: !input startup_delay
+  startup_ts: "{{ now().timestamp() }}"
+
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: startup
+        sequence:
+          - delay: "{{ (startup_delay | float(0)) * 60 }}"
+          - action: calendar.get_events
+            target:
+              entity_id: !input calendar
+            data:
+              duration:
+                seconds: 1
+            response_variable: cal_res
+            continue_on_error: true
+          - repeat:
+              for_each: >-
+                {{ cal_res[calendar].events if cal_res is defined else [] }}
+              sequence:
+                # Events that began during the startup delay were already
+                # dispatched by their own 'start' trigger; skip them here.
+                - condition: template
+                  value_template: >-
+                    {{ (as_datetime(repeat.item.start) | as_local).timestamp() < startup_ts }}
+                - action: script.turn_on
+                  target:
+                    entity_id: !input handler_script
+                  data:
+                    variables:
+                      trigger_id: startup
+                      event: "{{ repeat.item }}"
+    default:
+      - action: script.turn_on
+        target:
+          entity_id: !input handler_script
+        data:
+          variables:
+            trigger_id: "{{ trigger.id }}"
+            event: "{{ trigger.calendar_event }}"
+
+mode: parallel
+max: 20
