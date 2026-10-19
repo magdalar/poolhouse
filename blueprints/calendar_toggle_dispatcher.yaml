@@ -1,6 +1,5 @@
 blueprint:
   name: "Calendar Toggle: Dispatcher"
-  author: you
   domain: automation
   description: >-
     Fires on calendar event start/end and hands each event to the

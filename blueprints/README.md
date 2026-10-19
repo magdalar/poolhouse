@@ -79,7 +79,7 @@ The 2-second margin avoids racing the event's own `end` trigger.
 
 Leave the **Description** blank for immediate execution. To delay an event until a secondary condition is met (bounded by the end of the calendar event), use either **Shorthand** or **YAML** in the Description.
 
-> **Parsing rule:** if the Description contains a `:`, it is parsed as YAML. Otherwise it is treated as shorthand, which must be a single entity id with no spaces. Free-text notes such as `Remember: check sensor` will therefore be misparsed. Keep descriptions to the forms below.
+> **Parsing rule:** if the Description contains a `:`, it is parsed as `key: value` lines. Otherwise it is treated as shorthand, which must be a single entity id with no spaces. Free-text notes such as `Remember: check sensor` will therefore be misparsed. Keep descriptions to the forms below.
 
 ### Option A: Shorthand Syntax
 1. **Wait for Motion / Active State (`entity_id`)**
@@ -93,13 +93,13 @@ Leave the **Description** blank for immediate execution. To delay an event until
    ```
    * **Behavior:** Fires immediately at event start if the sensor is currently `'off'` and has remained `'off'` for at least **5 minutes**. Otherwise, waits until the sensor has been `'off'` for 5 continuous minutes, or forces execution at the end of the calendar event.
 
-### Option B: YAML Syntax
-For custom lookback windows, specific cutoff times, or custom inactivity durations, provide valid YAML in the Description:
+### Option B: `key: value` Syntax
+For custom lookback windows, specific cutoff times, or custom inactivity durations, put one `key: value` pair per line in the Description. Only simple pairs are supported (no nesting, lists, or multi-line values), and surrounding quotes are optional. Home Assistant has no YAML template filter, so this is a small purpose-built parser rather than full YAML.
 
 | Parameter | Default | Applies To | Description |
 | :--- | :--- | :--- | :--- |
 | `wait_entity` | *(required)* | All | The `entity_id` to monitor (e.g., `binary_sensor.motion`). |
-| `state` | `'on'` | All | Target state to wait for. **Must be quoted: `"on"` or `"off"`.** Unquoted `off` is parsed by YAML as boolean `false` and will not work. |
+| `state` | `'on'` | All | Target state to wait for: `on` or `off` (quotes optional). |
 | `within_minutes` | `60` | `state: "on"` | Triggers immediately at event start if `wait_entity` changed state within this many minutes prior to event start. |
 | `since` | *(none)* | `state: "on"` | Overrides `within_minutes` with a fixed time string (`"HH:MM:SS"`, e.g., `"05:00:00"`), interpreted as that time **today**. |
 | `for_minutes` | `5` (when `off`) | `state: "off"` | Requires `wait_entity` to stay `'off'` continuously for this many minutes before firing. |
@@ -194,7 +194,7 @@ After a restart, the Dispatcher waits the configured **startup delay** (default 
 5. **All-Day Events and Timezones:**
    * The handler converts event times to local time and has been written to handle both timezone-aware and naive timestamps, but all-day events have not been tested. Check one with the test call above before relying on them.
 6. **Rich-Text / HTML Formatting in Calendar Descriptions:**
-   * Some calendar clients (like Google Calendar web UI) automatically inject HTML tags (`<br>`, `<a href="...">`) into the Description field if you paste text or links. Always paste plain text into the Description so `from_yaml` and entity parsing do not fail.
+   * Some calendar clients (like Google Calendar web UI) automatically inject HTML tags (`<br>`, `<a href="...">`) into the Description field if you paste text or links. Always paste plain text into the Description so the description parsing does not fail.
 7. **Concurrency Limit (`max: 20`):**
    * Delayed events hold open a running execution slot in the Handler script (`mode: parallel`), so up to 20 events can wait or execute simultaneously. If more than 20 events overlap at the same time, additional runs are dropped and logged by Home Assistant against the script.
 8. **Reloading Does Not Cancel Waits:**

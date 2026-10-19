@@ -8,9 +8,10 @@ blueprint:
     with 'Start:' or 'End:' to skip the on or off action for toggleable
     domains. The optional Description delays the action until motion (default:
     triggered within the last 60 mins, or currently on) or inactivity (prefix
-    with '!' or use state: 'off', default: clear for 5 mins), bounded by the
-    event end. Description may be an entity id, '!entity_id', or YAML with
-    wait_entity, state, within_minutes, for_minutes, since.
+    with '!' or use state: off, default: clear for 5 mins), bounded by the
+    event end. Description may be an entity id, '!entity_id', or simple
+    'key: value' lines (wait_entity, state, within_minutes, for_minutes,
+    since).
   input:
     rerun_scenes_on_startup:
       name: Re-run scenes/scripts after a Home Assistant restart
@@ -55,7 +56,15 @@ sequence:
       #  - "binary_sensor.xyz"  -> wait for 'on' (or changed within last 60 mins)
       desc_config: >-
         {% if ':' in raw_desc %}
-          {{ raw_desc | from_yaml }}
+          {% set ns = namespace(items=[]) %}
+          {% for line in raw_desc.splitlines() %}
+            {% set parts = line.split(':', 1) %}
+            {% if parts | length == 2 and not line.strip().startswith('#') %}
+              {% set v = parts[1] | trim | replace('"', '') | replace("'", '') %}
+              {% set ns.items = ns.items + [(parts[0] | trim | lower, v)] %}
+            {% endif %}
+          {% endfor %}
+          {{ dict(ns.items) }}
         {% elif raw_desc.startswith('!') and '.' in raw_desc and ' ' not in raw_desc %}
           {{ {'wait_entity': raw_desc[1:], 'state': 'off', 'for_minutes': 5} }}
         {% elif '.' in raw_desc and ' ' not in raw_desc %}
