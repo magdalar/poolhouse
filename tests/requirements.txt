@@ -1,0 +1,7 @@
+# Each pytest-homeassistant-custom-component release pins one exact
+# homeassistant version. 0.13.375 pins homeassistant==2026.10.4.
+# To move to a newer HA, pick the release that pins it:
+#   https://pypi.org/project/pytest-homeassistant-custom-component/#history
+# and bump the Python base image in Dockerfile if its Requires-Python changes.
+pytest-homeassistant-custom-component==0.13.375
+yamllint==1.37.1

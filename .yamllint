@@ -1,0 +1,12 @@
+extends: default
+ignore: |
+  .git/
+rules:
+  # Jinja templates and descriptions make long lines unavoidable.
+  line-length: disable
+  document-start: disable
+  truthy:
+    # 'on'/'off' appear as HA states; YAML 1.1 booleans aren't a risk here.
+    check-keys: false
+  comments:
+    min-spaces-from-content: 1
