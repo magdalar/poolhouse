@@ -6,7 +6,7 @@ blueprint:
     Assistant to start playback. Falls back to a spoken TTS message if no book
     is found.
   domain: script
-  source_url: https://github.com/magdalar/poolhouse/blueprints/scripts/play_last_audiobook.yaml
+  source_url: https://github.com/magdalar/poolhouse/blob/main/blueprints/scripts/play_last_audiobook.yaml
   input:
     default_media_player:
       name: Default Media Player
