@@ -14,6 +14,13 @@ scripts/test.sh -k startup            # extra args go to pytest
 scripts/test.sh tests/test_handler.py::test_plain_toggle_turns_on_at_start
 ```
 
+Without Docker (e.g. in a Claude Code container), use a venv in the checkout. It needs Python 3.14, the version `tests/Dockerfile` uses:
+
+```sh
+python3 -m venv .venv && .venv/bin/pip install -r tests/requirements.txt
+.venv/bin/yamllint -s . && .venv/bin/python -m pytest -p no:cacheprovider
+```
+
 The script builds `tests/Dockerfile` (image `poolhouse-tests`) and runs it with the repo mounted read-only. The tests start a real in-process Home Assistant via `pytest-homeassistant-custom-component`. They load the blueprints from `blueprints/`, call the Handler with fake events, and drive the Dispatcher through a fake calendar entity.
 
 - **HA version:** each harness release pins one exact `homeassistant` version, so the HA version is set by `tests/requirements.txt`, and production runs 2026.10.x, moving to 2026.11. To upgrade, pick the harness release on PyPI that pins the target HA, and update the `python:` base image in `tests/Dockerfile` if its `Requires-Python` changed.
