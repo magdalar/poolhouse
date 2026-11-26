@@ -1,6 +1,7 @@
 extends: default
 ignore: |
   .git/
+  .venv/
 rules:
   # Jinja templates and descriptions make long lines unavoidable.
   line-length: disable
